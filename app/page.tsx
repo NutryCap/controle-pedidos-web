@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   FileText,
   LogOut,
+  PackageSearch,
   RefreshCw,
   Search,
   Upload,
@@ -159,6 +160,8 @@ export default function Home() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [busca, setBusca] = useState('');
   const [carregando, setCarregando] = useState(true);
+  const [entrando, setEntrando] = useState(false);
+  const [atualizando, setAtualizando] = useState(false);
   const [mensagem, setMensagem] = useState('');
   const [tipoMensagem, setTipoMensagem] = useState<'ok' | 'erro' | 'info'>('info');
   const [importando, setImportando] = useState(false);
@@ -193,6 +196,7 @@ export default function Home() {
 
   async function carregarPedidos() {
     if (!usuario) return;
+    setAtualizando(true);
 
     let query = supabase.from('pedidos').select('*').order('entrada', { ascending: false });
 
@@ -205,10 +209,12 @@ export default function Home() {
     if (error) {
       setMensagem(explicarErroSupabase(error));
       setTipoMensagem('erro');
+      setAtualizando(false);
       return;
     }
 
     setPedidos((data || []) as Pedido[]);
+    setAtualizando(false);
   }
 
   useEffect(() => {
@@ -225,6 +231,7 @@ export default function Home() {
     e.preventDefault();
     setMensagem('');
     setTipoMensagem('info');
+    setEntrando(true);
 
     const { error } = await supabase.auth.signInWithPassword({ email, password: senha });
 
@@ -232,6 +239,7 @@ export default function Home() {
       setMensagem(explicarErroSupabase(error));
       setTipoMensagem('erro');
     }
+    setEntrando(false);
   }
 
   async function sair() {
@@ -404,49 +412,148 @@ export default function Home() {
     entregues: pedidosFiltrados.filter((p) => p.entregue).length,
   }), [pedidosFiltrados]);
 
-  if (carregando) return <main className="min-h-screen flex items-center justify-center">Carregando...</main>;
+  if (carregando) {
+    return (
+      <main className="min-h-screen flex items-center justify-center" style={{ background: 'var(--paper)' }}>
+        <div className="flex items-center gap-3" style={{ color: 'var(--ink-soft)' }}>
+          <RefreshCw className="animate-spin" size={20} />
+          <span className="font-mono text-sm">carregando painel…</span>
+        </div>
+      </main>
+    );
+  }
 
   if (!usuario) {
     return (
-      <main className="min-h-screen flex items-center justify-center p-4 bg-slate-100">
-        <form onSubmit={login} className="w-full max-w-md bg-white rounded-3xl shadow-xl p-6 space-y-4">
-          <div>
-            <h1 className="text-2xl font-bold">Controle de Pedidos</h1>
-            <p className="text-slate-500">Entre com o e-mail e senha cadastrados no Supabase.</p>
+      <main className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--paper)' }}>
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div
+              className="inline-flex items-center justify-center w-14 h-14 rounded-full mb-3"
+              style={{ background: 'var(--stamp)' }}
+            >
+              <PackageSearch className="text-white" size={26} />
+            </div>
+            <h1 className="font-display text-3xl" style={{ color: 'var(--ink)' }}>
+              Controle de Pedidos
+            </h1>
+            <p className="text-sm mt-1" style={{ color: 'var(--ink-soft)' }}>
+              Nutry Cap · acompanhamento por status
+            </p>
           </div>
-          <input className="w-full border rounded-xl px-4 py-3" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="w-full border rounded-xl px-4 py-3" placeholder="Senha" type="password" value={senha} onChange={(e) => setSenha(e.target.value)} />
-          <button className="w-full bg-emerald-600 text-white rounded-xl py-3 font-semibold">Entrar</button>
-          {mensagem && <p className="text-sm text-red-600">{mensagem}</p>}
-        </form>
+
+          <form
+            onSubmit={login}
+            className="rounded-2xl p-7 space-y-4"
+            style={{ background: 'var(--paper-raised)', border: '1px solid var(--line)', boxShadow: '0 1px 2px rgba(31,42,36,0.06)' }}
+          >
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--ink-soft)' }}>
+                  E-mail
+                </label>
+                <input
+                  className="w-full mt-1 rounded-lg px-4 py-3 text-[15px] bg-transparent"
+                  style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}
+                  placeholder="seu.email@nutrycap.com.br"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--ink-soft)' }}>
+                  Senha
+                </label>
+                <input
+                  className="w-full mt-1 rounded-lg px-4 py-3 text-[15px] bg-transparent"
+                  style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}
+                  placeholder="••••••••"
+                  type="password"
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <button
+              disabled={entrando}
+              className="w-full rounded-lg py-3 font-semibold text-white flex items-center justify-center gap-2 transition-opacity disabled:opacity-60"
+              style={{ background: 'var(--stamp)' }}
+            >
+              {entrando ? <RefreshCw className="animate-spin" size={18} /> : null}
+              {entrando ? 'Entrando…' : 'Entrar'}
+            </button>
+
+            {mensagem && (
+              <p className="text-sm rounded-lg px-3 py-2" style={{ background: 'var(--alert-soft)', color: 'var(--alert)' }}>
+                {mensagem}
+              </p>
+            )}
+          </form>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen p-4 md:p-6 bg-slate-100">
+    <main className="min-h-screen p-4 md:p-6" style={{ background: 'var(--paper)' }}>
       <div className="max-w-[1800px] mx-auto space-y-4">
-        <header className="bg-white rounded-3xl shadow p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <header
+          className="rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+          style={{ background: 'var(--stamp)' }}
+        >
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">Painel de Pedidos</h1>
-            <p className="text-slate-500">{usuario.nome} • {usuario.perfil.replace('_', ' ')}</p>
+            <p className="font-display text-xs tracking-widest" style={{ color: '#cdd9ec' }}>
+              Nutry Cap · expedição
+            </p>
+            <h1 className="font-display text-3xl md:text-4xl text-white leading-tight">
+              Painel de Pedidos
+            </h1>
+            <p className="text-sm mt-1" style={{ color: '#cdd9ec' }}>
+              {usuario.nome} · {usuario.perfil.replace('_', ' ')}
+            </p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={carregarPedidos} className="px-4 py-2 rounded-xl bg-slate-900 text-white flex items-center gap-2"><RefreshCw size={18} /> Atualizar</button>
-            <button onClick={sair} className="px-4 py-2 rounded-xl bg-white border flex items-center gap-2"><LogOut size={18} /> Sair</button>
+            <button
+              onClick={carregarPedidos}
+              disabled={atualizando}
+              className="px-4 py-2 rounded-lg text-white flex items-center gap-2 font-medium disabled:opacity-60"
+              style={{ background: 'var(--stamp-dark)' }}
+            >
+              <RefreshCw size={18} className={atualizando ? 'animate-spin' : ''} />
+              {atualizando ? 'Atualizando…' : 'Atualizar'}
+            </button>
+            <button
+              onClick={sair}
+              className="px-4 py-2 rounded-lg flex items-center gap-2 font-medium"
+              style={{ background: 'var(--paper-raised)', color: 'var(--ink)' }}
+            >
+              <LogOut size={18} /> Sair
+            </button>
           </div>
         </header>
 
         {mensagem && (
-          <div className={`rounded-xl p-4 shadow flex gap-3 items-start ${tipoMensagem === 'erro' ? 'bg-red-50 border-l-4 border-red-500 text-red-700' : tipoMensagem === 'ok' ? 'bg-emerald-50 border-l-4 border-emerald-500 text-emerald-700' : 'bg-white border-l-4 border-blue-500 text-slate-700'}`}>
+          <div
+            className="rounded-xl p-4 flex gap-3 items-start"
+            style={
+              tipoMensagem === 'erro'
+                ? { background: 'var(--alert-soft)', borderLeft: '4px solid var(--alert)', color: 'var(--alert)' }
+                : tipoMensagem === 'ok'
+                ? { background: 'var(--ok-soft)', borderLeft: '4px solid var(--ok)', color: 'var(--ok)' }
+                : { background: 'var(--paper-raised)', borderLeft: '4px solid var(--stamp)', color: 'var(--ink)' }
+            }
+          >
             {tipoMensagem === 'erro' ? <AlertTriangle size={20} /> : <FileText size={20} />}
-            <div>{mensagem}</div>
+            <div className="text-sm">{mensagem}</div>
           </div>
         )}
 
         {relatorio && (
-          <section className="bg-white rounded-3xl shadow p-4 space-y-3">
-            <div className="flex items-center gap-2 font-bold"><FileText size={18} />Relatório da importação</div>
+          <section className="rounded-2xl p-4 space-y-3" style={{ background: 'var(--paper-raised)', border: '1px solid var(--line)' }}>
+            <div className="flex items-center gap-2 font-display text-sm tracking-wide" style={{ color: 'var(--ink)' }}>
+              <FileText size={16} /> Relatório da importação
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
               <MiniCard label="Linhas lidas" value={relatorio.linhasLidas} />
               <MiniCard label="Válidas" value={relatorio.validas} />
@@ -456,25 +563,42 @@ export default function Home() {
               <MiniCard label="Status corrigido" value={relatorio.statusCorrigido} />
               <MiniCard label="Duplicados" value={relatorio.duplicados} />
             </div>
-            {relatorio.exemplosIgnorados.length > 0 && <p className="text-sm text-slate-500">Exemplos ignorados: {relatorio.exemplosIgnorados.join(' | ')}</p>}
+            {relatorio.exemplosIgnorados.length > 0 && (
+              <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>
+                Exemplos ignorados: {relatorio.exemplosIgnorados.join(' | ')}
+              </p>
+            )}
           </section>
         )}
 
         <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <Card label="Total" value={totais.total} />
-          <Card label="Atrasados" value={totais.atrasados} className="text-red-600" />
-          <Card label="Prazo ≤ 2 dias" value={totais.proximos} className="text-blue-600" />
-          <Card label="Entregues" value={totais.entregues} className="text-emerald-600" />
+          <Card label="Atrasados" value={totais.atrasados} color="var(--alert)" />
+          <Card label="Prazo ≤ 2 dias" value={totais.proximos} color="var(--warn)" />
+          <Card label="Entregues" value={totais.entregues} color="var(--ok)" />
         </section>
 
-        <section className="bg-white rounded-3xl shadow p-4 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
+        <section
+          className="rounded-2xl p-4 flex flex-col md:flex-row gap-3 md:items-center md:justify-between"
+          style={{ background: 'var(--paper-raised)', border: '1px solid var(--line)' }}
+        >
           <div className="relative w-full md:max-w-md">
-            <Search className="absolute left-3 top-3 text-slate-400" size={20} />
-            <input className="w-full border rounded-xl pl-10 pr-4 py-3" placeholder="Buscar pedido, cliente, representante ou prazo" value={busca} onChange={(e) => setBusca(e.target.value)} />
+            <Search className="absolute left-3 top-3" style={{ color: 'var(--ink-soft)' }} size={20} />
+            <input
+              className="w-full rounded-lg pl-10 pr-4 py-3 bg-transparent"
+              style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}
+              placeholder="Buscar pedido, cliente, representante ou prazo"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
           </div>
           {podeImportar && (
-            <label className={`cursor-pointer rounded-xl px-4 py-3 font-semibold flex items-center gap-2 justify-center ${importando ? 'bg-slate-400 text-white pointer-events-none' : 'bg-emerald-600 text-white'}`}>
-              <Upload size={18} /> {importando ? 'Importando...' : 'Importar planilha'}
+            <label
+              className="cursor-pointer rounded-lg px-4 py-3 font-semibold flex items-center gap-2 justify-center text-white"
+              style={importando ? { background: '#9a9482', pointerEvents: 'none' } : { background: 'var(--stamp)' }}
+            >
+              {importando ? <RefreshCw className="animate-spin" size={18} /> : <Upload size={18} />}
+              {importando ? 'Importando...' : 'Importar planilha'}
               <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={importando} onChange={(e) => e.target.files?.[0] && importarPlanilha(e.target.files[0])} />
             </label>
           )}
@@ -484,14 +608,28 @@ export default function Home() {
           {COLUNAS.map((coluna) => {
             const lista = grupos[coluna.id as keyof typeof grupos];
             return (
-              <div key={coluna.id} className="bg-white rounded-3xl shadow p-3 min-h-[300px]">
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-bold text-slate-900">{coluna.titulo}</h2>
-                  <span className="text-sm bg-slate-100 px-3 py-1 rounded-full font-semibold">{lista.length}</span>
+              <div key={coluna.id} className="rounded-2xl p-3 min-h-[300px]" style={{ background: 'var(--paper-raised)', border: '1px solid var(--line)' }}>
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <h2 className="font-display text-sm tracking-wide" style={{ color: 'var(--ink)' }}>
+                    {coluna.titulo}
+                  </h2>
+                  <span
+                    className="text-xs font-mono px-2.5 py-1 rounded-full font-semibold"
+                    style={{ background: 'var(--paper)', color: 'var(--ink-soft)', border: '1px solid var(--line)' }}
+                  >
+                    {lista.length}
+                  </span>
                 </div>
                 <div className="space-y-3">
                   {lista.map((p) => <PedidoCard key={p.seq} pedido={p} podeEntregar={podeEntregar} marcarEntregue={marcarEntregue} />)}
-                  {!lista.length && <div className="text-center text-sm text-slate-400 border border-dashed rounded-2xl p-4">Nenhum pedido</div>}
+                  {!lista.length && (
+                    <div
+                      className="text-center text-sm rounded-xl p-4"
+                      style={{ color: 'var(--ink-soft)', border: '1px dashed var(--line)' }}
+                    >
+                      Nenhum pedido
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -506,26 +644,41 @@ function PedidoCard({ pedido, podeEntregar, marcarEntregue }: { pedido: Pedido; 
   const atrasado = pedido.situacao_prazo === 'atrasado' && !pedido.entregue;
   const proximo = pedido.situacao_prazo === 'proximo' && !pedido.entregue;
 
+  const acento = atrasado ? 'var(--alert)' : proximo ? 'var(--warn)' : pedido.entregue ? 'var(--ok)' : 'var(--line)';
+
   return (
-    <article className={`rounded-2xl border p-3 space-y-3 ${atrasado ? 'bg-red-50 border-red-300' : proximo ? 'bg-blue-50 border-blue-300' : pedido.entregue ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-200'}`}>
+    <article
+      className="ticket-edge rounded-xl pl-4 pr-3 py-3 space-y-3"
+      style={{ background: 'var(--paper)', border: '1px solid var(--line)', borderLeft: `4px solid ${acento}` }}
+    >
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="font-bold text-slate-900">#{pedido.seq}</h3>
-          {atrasado && <span className="text-[11px] bg-red-600 text-white px-2 py-1 rounded-full">Atrasado</span>}
-          {proximo && <span className="text-[11px] bg-blue-600 text-white px-2 py-1 rounded-full">Próximo</span>}
-          {pedido.entregue && <span className="text-[11px] bg-emerald-600 text-white px-2 py-1 rounded-full">Entregue</span>}
+          <h3 className="font-mono font-semibold text-[15px]" style={{ color: 'var(--ink)' }}>
+            #{pedido.seq}
+          </h3>
+          {atrasado && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--alert)', color: 'white' }}>Atrasado</span>}
+          {proximo && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--warn)', color: 'white' }}>Próximo</span>}
+          {pedido.entregue && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--ok)', color: 'white' }}>Entregue</span>}
         </div>
-        <p className="text-sm font-medium text-slate-700 line-clamp-2">{pedido.cliente || 'Cliente não informado'}</p>
-        <p className="text-xs text-slate-500">Rep.: {pedido.representante || '-'}</p>
+        <p className="text-sm font-medium line-clamp-2" style={{ color: 'var(--ink)' }}>{pedido.cliente || 'Cliente não informado'}</p>
+        <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>Rep.: {pedido.representante || '-'}</p>
       </div>
-      <div className="text-xs text-slate-600 space-y-1">
-        <p>Entrada: <b>{formatarData(pedido.entrada)}</b></p>
-        <p>Prazo: <b>{formatarData(pedido.prazo_final)}</b></p>
+      <div className="text-xs space-y-1" style={{ color: 'var(--ink-soft)' }}>
+        <p>Entrada: <b style={{ color: 'var(--ink)' }}>{formatarData(pedido.entrada)}</b></p>
+        <p>Prazo: <b style={{ color: 'var(--ink)' }}>{formatarData(pedido.prazo_final)}</b></p>
         <p>{pedido.mensagem_prazo || '-'}</p>
       </div>
-      {pedido.observacao && <p className="text-xs text-slate-500 border-t pt-2">Obs: {pedido.observacao}</p>}
+      {pedido.observacao && (
+        <p className="text-xs pt-2" style={{ color: 'var(--ink-soft)', borderTop: '1px solid var(--line)' }}>
+          Obs: {pedido.observacao}
+        </p>
+      )}
       {podeEntregar && !pedido.entregue && (
-        <button onClick={() => marcarEntregue(pedido.seq)} className="w-full bg-emerald-600 text-white px-3 py-2 rounded-xl text-sm font-semibold flex items-center justify-center gap-2">
+        <button
+          onClick={() => marcarEntregue(pedido.seq)}
+          className="w-full px-3 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 text-white"
+          style={{ background: 'var(--ok)' }}
+        >
           <CheckCircle2 size={16} /> Marcar entregue
         </button>
       )}
@@ -533,10 +686,20 @@ function PedidoCard({ pedido, podeEntregar, marcarEntregue }: { pedido: Pedido; 
   );
 }
 
-function Card({ label, value, className = '' }: { label: string; value: number; className?: string }) {
-  return <div className="bg-white rounded-3xl shadow p-4"><p className="text-sm text-slate-500">{label}</p><p className={`text-3xl font-bold ${className}`}>{value}</p></div>;
+function Card({ label, value, color }: { label: string; value: number; color?: string }) {
+  return (
+    <div className="rounded-2xl p-4" style={{ background: 'var(--paper-raised)', border: '1px solid var(--line)' }}>
+      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--ink-soft)' }}>{label}</p>
+      <p className="font-display text-3xl mt-0.5" style={{ color: color || 'var(--ink)' }}>{value}</p>
+    </div>
+  );
 }
 
 function MiniCard({ label, value }: { label: string; value: number }) {
-  return <div className="bg-slate-100 rounded-2xl p-3"><p className="text-xs text-slate-500">{label}</p><p className="text-xl font-bold">{value}</p></div>;
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--paper)', border: '1px solid var(--line)' }}>
+      <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{label}</p>
+      <p className="font-mono text-xl font-semibold" style={{ color: 'var(--ink)' }}>{value}</p>
+    </div>
+  );
 }

@@ -2,7 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Controle de Pedidos',
+  title: 'Controle de Pedidos · Nutry Cap',
   description: 'Painel de acompanhamento de pedidos por status',
 };
 

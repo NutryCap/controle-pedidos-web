@@ -2,8 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
-
 :root {
   --paper: #f7f4ec;
   --paper-raised: #fffdf8;
@@ -28,17 +26,17 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: 'Source Sans 3', system-ui, sans-serif;
+  font-family: var(--font-body), system-ui, sans-serif;
 }
 
 .font-display {
-  font-family: 'Barlow Condensed', system-ui, sans-serif;
+  font-family: var(--font-display), system-ui, sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .font-mono {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-family: var(--font-mono-num), ui-monospace, monospace;
 }
 
 .line-clamp-2 {

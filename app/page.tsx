@@ -176,6 +176,19 @@ function comTimeout<T>(promise: PromiseLike<T>, ms: number, mensagemErro: string
   });
 }
 
+const EMAIL_COMERCIAL = 'comercialnutrycap@gmail.com';
+const EMAIL_ATENDIMENTO = 'atendimentonutrycap@gmail.com';
+
+// Regra: dias 1-5 do mês, só o e-mail comercial pode definir a meta do mês corrente.
+// A partir do dia 6, se a meta ainda não existe, só o e-mail de atendimento pode definir.
+// Depois de criada, a meta nunca pode ser editada por ninguém (trava no banco e na UI).
+function podeDefinirMeta(emailUsuario: string | undefined, metaJaExiste: boolean, hoje: Date = new Date()) {
+  if (metaJaExiste) return false;
+  const dia = hoje.getDate();
+  if (dia <= 5) return emailUsuario === EMAIL_COMERCIAL || emailUsuario === EMAIL_ATENDIMENTO;
+  return emailUsuario === EMAIL_ATENDIMENTO;
+}
+
 export default function Home() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
@@ -196,6 +209,15 @@ export default function Home() {
   const [pedidoJustificando, setPedidoJustificando] = useState<Pedido | null>(null);
   const [textoJustificativa, setTextoJustificativa] = useState('');
   const [salvandoJustificativa, setSalvandoJustificativa] = useState(false);
+  const [muralItens, setMuralItens] = useState<{ id: string; tipo: string; texto: string }[]>([]);
+  const [muralIndice, setMuralIndice] = useState(0);
+  const [metaDoMes, setMetaDoMes] = useState<any | null>(null);
+  const [carregandoMeta, setCarregandoMeta] = useState(true);
+  const [mostrarFormMeta, setMostrarFormMeta] = useState(false);
+  const [metaGeralInput, setMetaGeralInput] = useState('');
+  const [metasRepresentantesInput, setMetasRepresentantesInput] = useState<Record<string, string>>({});
+  const [salvandoMeta, setSalvandoMeta] = useState(false);
+  const [representantesAtivos, setRepresentantesAtivos] = useState<{ id: string; nome: string; codigo: string }[]>([]);
 
   async function carregarUsuario() {
     try {
@@ -274,6 +296,123 @@ export default function Home() {
   useEffect(() => {
     if (usuario) carregarPedidos();
   }, [usuario]);
+
+  useEffect(() => {
+    if (usuario?.perfil !== 'visualizador') return;
+
+    async function carregarMural() {
+      const { data } = await supabase
+        .from('mural_painel')
+        .select('id, tipo, texto')
+        .eq('ativo', true)
+        .order('criado_em', { ascending: false })
+        .limit(20);
+      setMuralItens(data || []);
+    }
+
+    carregarMural();
+    const intervaloRecarga = setInterval(carregarMural, 5 * 60 * 1000); // recarrega a cada 5 minutos
+    return () => clearInterval(intervaloRecarga);
+  }, [usuario]);
+
+  useEffect(() => {
+    if (muralItens.length === 0) return;
+    const intervaloRotacao = setInterval(() => {
+      setMuralIndice((i) => (i + 1) % muralItens.length);
+    }, 12000); // troca de mensagem a cada 12 segundos
+    return () => clearInterval(intervaloRotacao);
+  }, [muralItens]);
+
+  async function carregarMetaDoMes() {
+    setCarregandoMeta(true);
+    try {
+      const agora = new Date();
+      const { data } = await supabase
+        .from('metas_mensais')
+        .select('*')
+        .eq('ano', agora.getFullYear())
+        .eq('mes', agora.getMonth() + 1)
+        .maybeSingle();
+      setMetaDoMes(data || null);
+    } finally {
+      setCarregandoMeta(false);
+    }
+  }
+
+  async function carregarRepresentantesAtivos() {
+    const { data } = await supabase
+      .from('usuarios')
+      .select('id, nome, representante_codigo')
+      .eq('perfil', 'representante');
+    setRepresentantesAtivos(
+      (data || [])
+        .filter((r) => r.representante_codigo)
+        .map((r) => ({ id: r.id, nome: r.nome, codigo: r.representante_codigo as string }))
+    );
+  }
+
+  useEffect(() => {
+    if (!usuario) return;
+    carregarMetaDoMes();
+    carregarRepresentantesAtivos();
+  }, [usuario]);
+
+  async function salvarMetaDoMes() {
+    if (!usuario) return;
+
+    const metaGeralNum = Number(metaGeralInput.replace(',', '.'));
+    if (!metaGeralNum || metaGeralNum <= 0) {
+      setMensagem('Informe um valor válido para a meta geral.');
+      setTipoMensagem('erro');
+      return;
+    }
+
+    const metasPorRepresentante: Record<string, number> = {};
+    for (const rep of representantesAtivos) {
+      const valor = Number((metasRepresentantesInput[rep.codigo] || '0').replace(',', '.'));
+      if (valor > 0) metasPorRepresentante[rep.codigo] = valor;
+    }
+
+    setSalvandoMeta(true);
+    try {
+      const agora = new Date();
+      const { data, error } = await comTimeout(
+        supabase
+          .from('metas_mensais')
+          .insert({
+            ano: agora.getFullYear(),
+            mes: agora.getMonth() + 1,
+            meta_geral: metaGeralNum,
+            metas_por_representante: metasPorRepresentante,
+            criado_por_email: usuario.email,
+          })
+          .select()
+          .single(),
+        20000,
+        'O envio da meta demorou demais e foi cancelado. Verifique sua conexão e tente novamente.'
+      );
+
+      if (error) {
+        if (error.code === '23505') {
+          setMensagem('A meta deste mês já foi definida por outra pessoa enquanto você preenchia. Recarregue a página.');
+        } else {
+          setMensagem(explicarErroSupabase(error));
+        }
+        setTipoMensagem('erro');
+        return;
+      }
+
+      setMetaDoMes(data);
+      setMostrarFormMeta(false);
+      setMensagem('Meta do mês definida com sucesso. Não será possível editá-la novamente.');
+      setTipoMensagem('ok');
+    } catch (error: any) {
+      setMensagem(`Erro de conexão ao salvar a meta: ${error?.message || String(error)}.`);
+      setTipoMensagem('erro');
+    } finally {
+      setSalvandoMeta(false);
+    }
+  }
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -628,6 +767,33 @@ export default function Home() {
     });
   }, [pedidosNoPeriodo]);
 
+  // Total vendido no mês corrente (todos os pedidos com entrada neste mês/ano), geral e por representante.
+  // Usa `pedidos` (base completa carregada do usuário), não `pedidosFiltrados`, pois a meta não deve
+  // depender do filtro de período/busca que a pessoa escolheu na tela.
+  const vendasDoMes = useMemo(() => {
+    const agora = new Date();
+    const anoAtual = agora.getFullYear();
+    const mesAtual = agora.getMonth() + 1;
+
+    const doMes = pedidos.filter((p) => {
+      if (!p.entrada) return false;
+      const [ano, mes] = p.entrada.split('-').map(Number);
+      return ano === anoAtual && mes === mesAtual;
+    });
+
+    const porRepresentante: Record<string, number> = {};
+    let geral = 0;
+    for (const p of doMes) {
+      const valor = Number(p.total) || 0;
+      geral += valor;
+      if (p.representante) {
+        porRepresentante[p.representante] = (porRepresentante[p.representante] || 0) + valor;
+      }
+    }
+
+    return { geral, porRepresentante };
+  }, [pedidos]);
+
   if (carregando) {
     return (
       <main className="min-h-screen flex items-center justify-center" style={{ background: 'var(--paper)' }}>
@@ -714,6 +880,21 @@ export default function Home() {
   return (
     <main className="min-h-screen p-4 md:p-6" style={{ background: 'var(--paper)' }}>
       <div className="max-w-[1800px] mx-auto space-y-4">
+        {usuario.perfil === 'visualizador' && muralItens.length > 0 && (
+          <div
+            className="rounded-2xl px-5 py-3 flex items-center overflow-hidden"
+            style={{ background: 'var(--ink)', minHeight: '52px' }}
+          >
+            <p
+              key={muralItens[muralIndice]?.id}
+              className="text-sm md:text-base font-medium text-white"
+              style={{ animation: 'mural-fade-in 0.6s ease' }}
+            >
+              {muralItens[muralIndice]?.texto}
+            </p>
+          </div>
+        )}
+
         <header
           className="rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
           style={{ background: 'var(--stamp)' }}
@@ -748,6 +929,137 @@ export default function Home() {
             </button>
           </div>
         </header>
+
+        {!carregandoMeta && (
+          <section
+            className="rounded-2xl p-5 space-y-4"
+            style={{ background: 'var(--paper-raised)', border: '1px solid var(--line)' }}
+          >
+            {metaDoMes ? (
+              <>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h2 className="font-display text-lg" style={{ color: 'var(--ink)' }}>
+                    Meta do mês
+                  </h2>
+                  <span className="text-xs" style={{ color: 'var(--ink-soft)' }}>
+                    Definida por {metaDoMes.criado_por_email}
+                  </span>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span style={{ color: 'var(--ink-soft)' }}>Geral da empresa</span>
+                    <span className="font-mono font-semibold" style={{ color: 'var(--ink)' }}>
+                      {vendasDoMes.geral.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      {' / '}
+                      {Number(metaDoMes.meta_geral).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  </div>
+                  <BarraProgresso valor={vendasDoMes.geral} meta={Number(metaDoMes.meta_geral)} />
+                </div>
+
+                {representantesAtivos.map((rep) => {
+                  const metaRep = Number(metaDoMes.metas_por_representante?.[rep.codigo] || 0);
+                  if (!metaRep) return null;
+                  const vendidoRep = vendasDoMes.porRepresentante[rep.codigo] || 0;
+                  return (
+                    <div key={rep.id}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span style={{ color: 'var(--ink-soft)' }}>{rep.nome}</span>
+                        <span className="font-mono font-semibold" style={{ color: 'var(--ink)' }}>
+                          {vendidoRep.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          {' / '}
+                          {metaRep.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </span>
+                      </div>
+                      <BarraProgresso valor={vendidoRep} meta={metaRep} />
+                    </div>
+                  );
+                })}
+              </>
+            ) : podeDefinirMeta(usuario.email, false) ? (
+              <>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h2 className="font-display text-lg" style={{ color: 'var(--ink)' }}>
+                    Meta do mês ainda não definida
+                  </h2>
+                  {!mostrarFormMeta && (
+                    <button
+                      onClick={() => setMostrarFormMeta(true)}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                      style={{ background: 'var(--stamp)' }}
+                    >
+                      Definir meta do mês
+                    </button>
+                  )}
+                </div>
+
+                {mostrarFormMeta && (
+                  <div className="space-y-3">
+                    <p className="text-xs" style={{ color: 'var(--alert)' }}>
+                      Atenção: depois de salva, a meta não poderá ser editada por ninguém.
+                    </p>
+                    <div>
+                      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--ink-soft)' }}>
+                        Meta geral da empresa (R$)
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={metaGeralInput}
+                        onChange={(e) => setMetaGeralInput(e.target.value)}
+                        placeholder="Ex: 50000"
+                        className="w-full mt-1 rounded-lg px-3 py-2 text-sm bg-transparent"
+                        style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}
+                      />
+                    </div>
+                    {representantesAtivos.map((rep) => (
+                      <div key={rep.id}>
+                        <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--ink-soft)' }}>
+                          Meta individual — {rep.nome} (R$)
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={metasRepresentantesInput[rep.codigo] || ''}
+                          onChange={(e) =>
+                            setMetasRepresentantesInput((prev) => ({ ...prev, [rep.codigo]: e.target.value }))
+                          }
+                          placeholder="Ex: 15000 (opcional)"
+                          className="w-full mt-1 rounded-lg px-3 py-2 text-sm bg-transparent"
+                          style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}
+                        />
+                      </div>
+                    ))}
+                    <div className="flex gap-2 justify-end pt-2">
+                      <button
+                        onClick={() => setMostrarFormMeta(false)}
+                        disabled={salvandoMeta}
+                        className="px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-60"
+                        style={{ background: 'var(--paper)', color: 'var(--ink)', border: '1px solid var(--line)' }}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={salvarMetaDoMes}
+                        disabled={salvandoMeta}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-60"
+                        style={{ background: 'var(--stamp)' }}
+                      >
+                        {salvandoMeta ? <RefreshCw className="animate-spin" size={16} /> : null}
+                        {salvandoMeta ? 'Salvando…' : 'Salvar meta (definitivo)'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--ink-soft)' }}>
+                A meta deste mês ainda não foi definida pelo responsável.
+              </p>
+            )}
+          </section>
+        )}
 
         {(usuario.perfil === 'gerente_expedicao' || usuario.perfil === 'admin') && pedidosAtrasoCritico.length > 0 && (
           <div
@@ -1169,6 +1481,24 @@ function MiniCard({ label, value }: { label: string; value: number }) {
     <div className="rounded-xl p-3" style={{ background: 'var(--paper)', border: '1px solid var(--line)' }}>
       <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>{label}</p>
       <p className="font-mono text-xl font-semibold" style={{ color: 'var(--ink)' }}>{value}</p>
+    </div>
+  );
+}
+
+function BarraProgresso({ valor, meta }: { valor: number; meta: number }) {
+  const percentual = meta > 0 ? Math.min(100, Math.round((valor / meta) * 100)) : 0;
+  const cor = percentual >= 100 ? 'var(--ok)' : percentual >= 60 ? 'var(--stamp)' : 'var(--warn)';
+
+  return (
+    <div className="rounded-full overflow-hidden" style={{ background: 'var(--line)', height: '8px' }}>
+      <div
+        style={{
+          width: `${percentual}%`,
+          height: '100%',
+          background: cor,
+          transition: 'width 0.4s ease',
+        }}
+      />
     </div>
   );
 }

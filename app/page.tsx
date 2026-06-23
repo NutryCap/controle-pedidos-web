@@ -45,6 +45,8 @@ type Pedido = {
   situacao_prazo: string | null;
   mensagem_prazo: string | null;
   motivo_atraso: string | null;
+  teve_corte: boolean;
+  motivo_corte: string | null;
 };
 
 type FiltroStatus = 'todos' | 'atrasados' | 'proximos' | 'entregues';
@@ -63,18 +65,18 @@ type RelatorioImportacao = {
 
 const COLUNAS = [
   { id: 'digitacao', titulo: 'Digitação', status: 1 },
-  { id: 'separacao', titulo: 'Separação / Pedido confirmado', status: 2 },
-  { id: 'enviado_completo', titulo: 'Enviado completo', status: 4 },
-  { id: 'enviado_corte', titulo: 'Enviado com corte', status: 5 },
+  { id: 'separacao', titulo: 'Separação', status: 2 },
+  { id: 'pedido_confirmado', titulo: 'Pedido Confirmado', status: 3 },
+  { id: 'em_rota', titulo: 'Em rota de entrega', status: null }, // agrupa status 4 e 5
   { id: 'entregue', titulo: 'Entregue', status: null },
 ];
 
 function statusTexto(status: any) {
   const s = Number(status);
   if (s === 1) return 'Digitação';
-  if (s === 2) return 'Separação / Pedido confirmado';
-  if (s === 4) return 'Enviado completo';
-  if (s === 5) return 'Enviado com corte';
+  if (s === 2) return 'Separação';
+  if (s === 3) return 'Pedido Confirmado';
+  if (s === 4 || s === 5) return 'Em rota de entrega';
   return status ? `Status ${status}` : 'Sem status';
 }
 
@@ -455,6 +457,40 @@ export default function Home() {
     }
   }
 
+  async function atualizarCorte(seq: string, teveCorte: boolean, motivoCorte: string) {
+    if (!podeEntregar || !usuario) {
+      setMensagem('Seu perfil não tem permissão para editar essa informação. Somente gerente de expedição ou admin podem fazer isso.');
+      setTipoMensagem('erro');
+      return;
+    }
+
+    try {
+      const { error } = await comTimeout(
+        supabase
+          .from('pedidos')
+          .update({
+            teve_corte: teveCorte,
+            motivo_corte: teveCorte ? motivoCorte.trim() || null : null,
+            atualizado_em: new Date().toISOString(),
+          })
+          .eq('seq', seq),
+        20000,
+        'A atualização demorou demais e foi cancelada. Verifique sua conexão e tente novamente.'
+      );
+
+      if (error) {
+        setMensagem(explicarErroSupabase(error));
+        setTipoMensagem('erro');
+        return;
+      }
+
+      await carregarPedidos();
+    } catch (error: any) {
+      setMensagem(`Erro de conexão ao atualizar corte: ${error?.message || String(error)}. Verifique sua internet e tente novamente.`);
+      setTipoMensagem('erro');
+    }
+  }
+
   async function salvarJustificativaAtraso() {
     if (!pedidoJustificando || !usuario) return;
 
@@ -569,8 +605,8 @@ export default function Home() {
   const grupos = useMemo(() => ({
     digitacao: pedidosFiltrados.filter((p) => !p.entregue && Number(p.status) === 1),
     separacao: pedidosFiltrados.filter((p) => !p.entregue && Number(p.status) === 2),
-    enviado_completo: pedidosFiltrados.filter((p) => !p.entregue && Number(p.status) === 4),
-    enviado_corte: pedidosFiltrados.filter((p) => !p.entregue && Number(p.status) === 5),
+    pedido_confirmado: pedidosFiltrados.filter((p) => !p.entregue && Number(p.status) === 3),
+    em_rota: pedidosFiltrados.filter((p) => !p.entregue && (Number(p.status) === 4 || Number(p.status) === 5)),
     entregue: pedidosFiltrados.filter((p) => p.entregue),
   }), [pedidosFiltrados]);
 
@@ -917,6 +953,7 @@ export default function Home() {
                         setPedidoJustificando(pedido);
                         setTextoJustificativa(pedido.motivo_atraso || '');
                       }}
+                      atualizarCorte={atualizarCorte}
                     />
                   ))}
                   {!lista.length && (
@@ -999,17 +1036,22 @@ function PedidoCard({
   marcarEntregue,
   podeJustificar,
   abrirJustificativa,
+  atualizarCorte,
 }: {
   pedido: Pedido;
   podeEntregar: boolean;
   marcarEntregue: (seq: string) => void;
   podeJustificar: boolean;
   abrirJustificativa: (pedido: Pedido) => void;
+  atualizarCorte: (seq: string, teveCorte: boolean, motivoCorte: string) => void;
 }) {
   const atrasado = pedido.situacao_prazo === 'atrasado' && !pedido.entregue;
   const proximo = pedido.situacao_prazo === 'proximo' && !pedido.entregue;
   const diasAtraso = pedido.dias_uteis_restantes != null ? -pedido.dias_uteis_restantes : 0;
   const atrasoCritico = atrasado && diasAtraso > 1 && !pedido.motivo_atraso;
+  const emRota = Number(pedido.status) === 4 || Number(pedido.status) === 5;
+
+  const [motivoCorteLocal, setMotivoCorteLocal] = useState(pedido.motivo_corte || '');
 
   const acento = atrasado ? 'var(--alert)' : proximo ? 'var(--warn)' : pedido.entregue ? 'var(--ok)' : 'var(--line)';
 
@@ -1030,6 +1072,9 @@ function PedidoCard({
           {atrasado && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--alert)', color: 'white' }}>Atrasado</span>}
           {proximo && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--warn)', color: 'white' }}>Próximo</span>}
           {pedido.entregue && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--ok)', color: 'white' }}>Entregue</span>}
+          {emRota && pedido.teve_corte && !pedido.entregue && (
+            <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--warn)', color: 'white' }}>Com corte</span>
+          )}
         </div>
         <p className="text-sm font-medium line-clamp-2" style={{ color: 'var(--ink)' }}>{pedido.cliente || 'Cliente não informado'}</p>
         <p className="text-xs" style={{ color: 'var(--ink-soft)' }}>Rep.: {pedido.representante || '-'}</p>
@@ -1049,6 +1094,33 @@ function PedidoCard({
           <b style={{ color: 'var(--ink)' }}>Motivo do atraso:</b> {pedido.motivo_atraso}
         </p>
       )}
+
+      {emRota && (
+        <div className="pt-2 space-y-2" style={{ borderTop: '1px solid var(--line)' }}>
+          <label className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--ink)' }}>
+            <input
+              type="checkbox"
+              checked={pedido.teve_corte}
+              disabled={!podeEntregar}
+              onChange={(e) => atualizarCorte(pedido.seq, e.target.checked, motivoCorteLocal)}
+            />
+            Teve corte (item faltante)
+          </label>
+          {pedido.teve_corte && (
+            <textarea
+              rows={2}
+              value={motivoCorteLocal}
+              disabled={!podeEntregar}
+              onChange={(e) => setMotivoCorteLocal(e.target.value)}
+              onBlur={() => atualizarCorte(pedido.seq, true, motivoCorteLocal)}
+              placeholder="O que faltou neste pedido?"
+              className="w-full rounded-lg px-2 py-1.5 text-xs bg-transparent resize-none"
+              style={{ border: '1px solid var(--line)', color: 'var(--ink)' }}
+            />
+          )}
+        </div>
+      )}
+
       {atrasoCritico && podeJustificar && (
         <button
           onClick={() => abrirJustificativa(pedido)}

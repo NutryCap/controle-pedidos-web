@@ -157,6 +157,22 @@ function explicarErroSupabase(error: any) {
   return msg || 'Erro desconhecido ao comunicar com o Supabase.';
 }
 
+function comTimeout<T>(promise: PromiseLike<T>, ms: number, mensagemErro: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(mensagemErro)), ms);
+    Promise.resolve(promise).then(
+      (valor) => {
+        clearTimeout(timer);
+        resolve(valor);
+      },
+      (erro) => {
+        clearTimeout(timer);
+        reject(erro);
+      }
+    );
+  });
+}
+
 export default function Home() {
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
@@ -179,53 +195,71 @@ export default function Home() {
   const [salvandoJustificativa, setSalvandoJustificativa] = useState(false);
 
   async function carregarUsuario() {
-    const { data: auth } = await supabase.auth.getUser();
+    try {
+      const { data: auth } = await comTimeout(
+        supabase.auth.getUser(),
+        20000,
+        'A verificação de login demorou demais.'
+      );
 
-    if (!auth.user) {
-      setUsuario(null);
-      setCarregando(false);
-      return;
-    }
+      if (!auth.user) {
+        setUsuario(null);
+        return;
+      }
 
-    const { data, error } = await supabase
-      .from('usuarios')
-      .select('*')
-      .eq('id', auth.user.id)
-      .single();
+      const { data, error } = await comTimeout(
+        supabase.from('usuarios').select('*').eq('id', auth.user.id).single(),
+        20000,
+        'A busca do seu perfil demorou demais.'
+      );
 
-    if (error || !data) {
-      setMensagem('Login existe no Auth, mas ainda não foi cadastrado na tabela usuarios. Cadastre o perfil no Supabase.');
+      if (error || !data) {
+        setMensagem('Login existe no Auth, mas ainda não foi cadastrado na tabela usuarios. Cadastre o perfil no Supabase.');
+        setTipoMensagem('erro');
+        setUsuario(null);
+        return;
+      }
+
+      setUsuario(data as Usuario);
+    } catch (error: any) {
+      setMensagem(`Erro de conexão ao carregar seu usuário: ${error?.message || String(error)}. Recarregue a página e tente novamente.`);
       setTipoMensagem('erro');
       setUsuario(null);
+    } finally {
       setCarregando(false);
-      return;
     }
-
-    setUsuario(data as Usuario);
-    setCarregando(false);
   }
 
   async function carregarPedidos() {
     if (!usuario) return;
     setAtualizando(true);
 
-    let query = supabase.from('pedidos').select('*').order('entrada', { ascending: false });
+    try {
+      let query = supabase.from('pedidos').select('*').order('entrada', { ascending: false });
 
-    if (usuario.perfil === 'representante') {
-      query = query.eq('representante', usuario.representante_codigo || '');
-    }
+      if (usuario.perfil === 'representante') {
+        query = query.eq('representante', usuario.representante_codigo || '');
+      }
 
-    const { data, error } = await query;
+      const { data, error } = await comTimeout(
+        query,
+        20000,
+        'A busca de pedidos demorou demais e foi cancelada. Verifique sua conexão e tente novamente.'
+      );
 
-    if (error) {
-      setMensagem(explicarErroSupabase(error));
+      if (error) {
+        setMensagem(explicarErroSupabase(error));
+        setTipoMensagem('erro');
+        return;
+      }
+
+      setPedidos((data || []) as Pedido[]);
+    } catch (error: any) {
+      setMensagem(`Erro de conexão ao buscar pedidos: ${error?.message || String(error)}. Verifique sua internet e tente novamente.`);
       setTipoMensagem('erro');
+    } finally {
       setAtualizando(false);
-      return;
     }
-
-    setPedidos((data || []) as Pedido[]);
-    setAtualizando(false);
   }
 
   useEffect(() => {
@@ -244,13 +278,23 @@ export default function Home() {
     setTipoMensagem('info');
     setEntrando(true);
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password: senha });
+    try {
+      const { error } = await comTimeout(
+        supabase.auth.signInWithPassword({ email, password: senha }),
+        20000,
+        'O login demorou demais e foi cancelado. Verifique sua conexão e tente novamente.'
+      );
 
-    if (error) {
-      setMensagem(explicarErroSupabase(error));
+      if (error) {
+        setMensagem(explicarErroSupabase(error));
+        setTipoMensagem('erro');
+      }
+    } catch (error: any) {
+      setMensagem(`Erro de conexão ao entrar: ${error?.message || String(error)}. Verifique sua internet e tente novamente.`);
       setTipoMensagem('erro');
+    } finally {
+      setEntrando(false);
     }
-    setEntrando(false);
   }
 
   async function sair() {
@@ -354,7 +398,11 @@ export default function Home() {
       const payloadFinal = Array.from(pedidosMap.values());
       const duplicados = payloadBruto.length - payloadFinal.length;
 
-      const { error } = await supabase.from('pedidos').upsert(payloadFinal, { onConflict: 'seq' });
+      const { error } = await comTimeout(
+        supabase.from('pedidos').upsert(payloadFinal, { onConflict: 'seq' }),
+        30000,
+        'O envio da planilha para o banco demorou demais e foi cancelado. Verifique sua conexão e tente importar novamente.'
+      );
 
       setRelatorio({ linhasLidas: rows.length, validas: payloadFinal.length, ignoradas, semData, semRepresentante, statusCorrigido, duplicados, exemplosIgnorados });
 
@@ -382,20 +430,29 @@ export default function Home() {
       return;
     }
 
-    const { error } = await supabase
-      .from('pedidos')
-      .update({ entregue: true, entregue_em: new Date().toISOString(), entregue_por: usuario.id, atualizado_em: new Date().toISOString() })
-      .eq('seq', seq);
+    try {
+      const { error } = await comTimeout(
+        supabase
+          .from('pedidos')
+          .update({ entregue: true, entregue_em: new Date().toISOString(), entregue_por: usuario.id, atualizado_em: new Date().toISOString() })
+          .eq('seq', seq),
+        20000,
+        'A atualização demorou demais e foi cancelada. Verifique sua conexão e tente novamente.'
+      );
 
-    if (error) {
-      setMensagem(explicarErroSupabase(error));
+      if (error) {
+        setMensagem(explicarErroSupabase(error));
+        setTipoMensagem('erro');
+        return;
+      }
+
+      setMensagem(`Pedido ${seq} marcado como entregue.`);
+      setTipoMensagem('ok');
+      await carregarPedidos();
+    } catch (error: any) {
+      setMensagem(`Erro de conexão ao marcar entregue: ${error?.message || String(error)}. Verifique sua internet e tente novamente.`);
       setTipoMensagem('erro');
-      return;
     }
-
-    setMensagem(`Pedido ${seq} marcado como entregue.`);
-    setTipoMensagem('ok');
-    await carregarPedidos();
   }
 
   async function salvarJustificativaAtraso() {
@@ -409,46 +466,61 @@ export default function Home() {
 
     setSalvandoJustificativa(true);
 
-    const { error: erroUpdate } = await supabase
-      .from('pedidos')
-      .update({
-        motivo_atraso: textoJustificativa.trim(),
-        motivo_atraso_em: new Date().toISOString(),
-        motivo_atraso_por: usuario.id,
-        atualizado_em: new Date().toISOString(),
-      })
-      .eq('seq', pedidoJustificando.seq);
+    try {
+      const { error: erroUpdate } = await comTimeout(
+        supabase
+          .from('pedidos')
+          .update({
+            motivo_atraso: textoJustificativa.trim(),
+            motivo_atraso_em: new Date().toISOString(),
+            motivo_atraso_por: usuario.id,
+            atualizado_em: new Date().toISOString(),
+          })
+          .eq('seq', pedidoJustificando.seq),
+        20000,
+        'O salvamento demorou demais e foi cancelado. Verifique sua conexão e tente novamente.'
+      );
 
-    if (erroUpdate) {
-      setMensagem(explicarErroSupabase(erroUpdate));
+      if (erroUpdate) {
+        setMensagem(explicarErroSupabase(erroUpdate));
+        setTipoMensagem('erro');
+        return;
+      }
+
+      const { error: erroHistorico } = await comTimeout(
+        supabase.from('historico_pedidos').insert({
+          seq: pedidoJustificando.seq,
+          acao: 'atraso_justificado',
+          usuario_id: usuario.id,
+          detalhes: {
+            motivo: textoJustificativa.trim(),
+            dias_uteis_restantes: pedidoJustificando.dias_uteis_restantes,
+            situacao_prazo: pedidoJustificando.situacao_prazo,
+          },
+        }),
+        20000,
+        'O registro no histórico demorou demais e foi cancelado.'
+      );
+
+      if (erroHistorico) {
+        setMensagem(`Motivo salvo no pedido, mas houve um erro ao registrar no histórico: ${explicarErroSupabase(erroHistorico)}`);
+        setTipoMensagem('erro');
+      } else {
+        setMensagem(`Justificativa do pedido ${pedidoJustificando.seq} registrada.`);
+        setTipoMensagem('ok');
+      }
+
+      // Só fecha o modal e limpa o texto se chegou até aqui sem erro de update.
+      // O erro de histórico ainda fecha o modal, pois o motivo já foi salvo no pedido.
+      setPedidoJustificando(null);
+      setTextoJustificativa('');
+      await carregarPedidos();
+    } catch (error: any) {
+      setMensagem(`Erro de conexão ao salvar justificativa: ${error?.message || String(error)}. Verifique sua internet e tente novamente.`);
       setTipoMensagem('erro');
+    } finally {
       setSalvandoJustificativa(false);
-      return;
     }
-
-    const { error: erroHistorico } = await supabase.from('historico_pedidos').insert({
-      seq: pedidoJustificando.seq,
-      acao: 'atraso_justificado',
-      usuario_id: usuario.id,
-      detalhes: {
-        motivo: textoJustificativa.trim(),
-        dias_uteis_restantes: pedidoJustificando.dias_uteis_restantes,
-        situacao_prazo: pedidoJustificando.situacao_prazo,
-      },
-    });
-
-    if (erroHistorico) {
-      setMensagem(`Motivo salvo no pedido, mas houve um erro ao registrar no histórico: ${explicarErroSupabase(erroHistorico)}`);
-      setTipoMensagem('erro');
-    } else {
-      setMensagem(`Justificativa do pedido ${pedidoJustificando.seq} registrada.`);
-      setTipoMensagem('ok');
-    }
-
-    setSalvandoJustificativa(false);
-    setPedidoJustificando(null);
-    setTextoJustificativa('');
-    await carregarPedidos();
   }
 
   const limitesPeriodo = useMemo(() => {

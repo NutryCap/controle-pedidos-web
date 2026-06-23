@@ -20,7 +20,8 @@ type Perfil =
   | 'assistente_vendas'
   | 'gerente_expedicao'
   | 'supervisor'
-  | 'admin';
+  | 'admin'
+  | 'visualizador';
 
 type Usuario = {
   id: string;
@@ -1095,13 +1096,12 @@ function PedidoCard({
         </p>
       )}
 
-      {emRota && (
+      {emRota && podeEntregar && (
         <div className="pt-2 space-y-2" style={{ borderTop: '1px solid var(--line)' }}>
           <label className="flex items-center gap-2 text-xs font-medium" style={{ color: 'var(--ink)' }}>
             <input
               type="checkbox"
               checked={pedido.teve_corte}
-              disabled={!podeEntregar}
               onChange={(e) => atualizarCorte(pedido.seq, e.target.checked, motivoCorteLocal)}
             />
             Teve corte (item faltante)
@@ -1110,7 +1110,6 @@ function PedidoCard({
             <textarea
               rows={2}
               value={motivoCorteLocal}
-              disabled={!podeEntregar}
               onChange={(e) => setMotivoCorteLocal(e.target.value)}
               onBlur={() => atualizarCorte(pedido.seq, true, motivoCorteLocal)}
               placeholder="O que faltou neste pedido?"
@@ -1119,6 +1118,11 @@ function PedidoCard({
             />
           )}
         </div>
+      )}
+      {emRota && !podeEntregar && pedido.teve_corte && pedido.motivo_corte && (
+        <p className="text-xs pt-2" style={{ color: 'var(--ink-soft)', borderTop: '1px solid var(--line)' }}>
+          <b style={{ color: 'var(--ink)' }}>Corte:</b> {pedido.motivo_corte}
+        </p>
       )}
 
       {atrasoCritico && podeJustificar && (

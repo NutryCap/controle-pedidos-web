@@ -953,40 +953,70 @@ export default function Home() {
           </div>
         )}
 
-        <header
-          className="rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
-          style={{ background: 'var(--stamp)' }}
-        >
-          <div>
-            <p className="font-display text-xs tracking-widest" style={{ color: '#cdd9ec' }}>
-              Nutry Cap · expedição
+        {usuario.perfil === 'visualizador' ? (
+          <header
+            className="rounded-xl px-4 py-2.5 flex items-center justify-between gap-3"
+            style={{ background: 'var(--paper-raised)', border: '1px solid var(--line)' }}
+          >
+            <p className="text-xs font-medium" style={{ color: 'var(--ink-soft)' }}>
+              Painel Nutry Cap
             </p>
-            <h1 className="font-display text-3xl md:text-4xl text-white leading-tight">
-              Painel de Pedidos
-            </h1>
-            <p className="text-sm mt-1" style={{ color: '#cdd9ec' }}>
-              {usuario.nome} · {usuario.perfil.replace('_', ' ')}
-            </p>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={carregarPedidos}
-              disabled={atualizando}
-              className="px-4 py-2 rounded-lg text-white flex items-center gap-2 font-medium disabled:opacity-60"
-              style={{ background: 'var(--stamp-dark)' }}
-            >
-              <RefreshCw size={18} className={atualizando ? 'animate-spin' : ''} />
-              {atualizando ? 'Atualizando…' : 'Atualizar'}
-            </button>
-            <button
-              onClick={sair}
-              className="px-4 py-2 rounded-lg flex items-center gap-2 font-medium"
-              style={{ background: 'var(--paper-raised)', color: 'var(--ink)' }}
-            >
-              <LogOut size={18} /> Sair
-            </button>
-          </div>
-        </header>
+            <div className="flex gap-2">
+              <button
+                onClick={carregarPedidos}
+                disabled={atualizando}
+                aria-label="Atualizar"
+                className="w-8 h-8 rounded-lg flex items-center justify-center disabled:opacity-60"
+                style={{ background: 'var(--paper)', color: 'var(--ink-soft)', border: '1px solid var(--line)' }}
+              >
+                <RefreshCw size={15} className={atualizando ? 'animate-spin' : ''} />
+              </button>
+              <button
+                onClick={sair}
+                aria-label="Sair"
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: 'var(--paper)', color: 'var(--ink-soft)', border: '1px solid var(--line)' }}
+              >
+                <LogOut size={15} />
+              </button>
+            </div>
+          </header>
+        ) : (
+          <header
+            className="rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+            style={{ background: 'var(--stamp)' }}
+          >
+            <div>
+              <p className="font-display text-xs tracking-widest" style={{ color: '#cdd9ec' }}>
+                Nutry Cap · expedição
+              </p>
+              <h1 className="font-display text-3xl md:text-4xl text-white leading-tight">
+                Painel de Pedidos
+              </h1>
+              <p className="text-sm mt-1" style={{ color: '#cdd9ec' }}>
+                {usuario.nome} · {usuario.perfil.replace('_', ' ')}
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={carregarPedidos}
+                disabled={atualizando}
+                className="px-4 py-2 rounded-lg text-white flex items-center gap-2 font-medium disabled:opacity-60"
+                style={{ background: 'var(--stamp-dark)' }}
+              >
+                <RefreshCw size={18} className={atualizando ? 'animate-spin' : ''} />
+                {atualizando ? 'Atualizando…' : 'Atualizar'}
+              </button>
+              <button
+                onClick={sair}
+                className="px-4 py-2 rounded-lg flex items-center gap-2 font-medium"
+                style={{ background: 'var(--paper-raised)', color: 'var(--ink)' }}
+              >
+                <LogOut size={18} /> Sair
+              </button>
+            </div>
+          </header>
+        )}
 
         {!carregandoMeta && (
           <section
@@ -1546,7 +1576,7 @@ function MiniCard({ label, value }: { label: string; value: number }) {
 
 function BarraProgresso({ valor, meta }: { valor: number; meta: number }) {
   const percentual = meta > 0 ? Math.min(100, Math.round((valor / meta) * 100)) : 0;
-  const cor = percentual >= 100 ? 'var(--ok)' : percentual >= 61 ? 'var(--stamp)' : 'var(--warn)';
+  const cor = percentual >= 100 ? 'var(--ok)' : percentual >= 60 ? 'var(--stamp)' : 'var(--warn)';
 
   return (
     <div className="rounded-full overflow-hidden" style={{ background: 'var(--line)', height: '8px' }}>

@@ -1546,7 +1546,7 @@ function MiniCard({ label, value }: { label: string; value: number }) {
 
 function BarraProgresso({ valor, meta }: { valor: number; meta: number }) {
   const percentual = meta > 0 ? Math.min(100, Math.round((valor / meta) * 100)) : 0;
-  const cor = percentual >= 100 ? 'var(--ok)' : percentual >= 60 ? 'var(--stamp)' : 'var(--warn)';
+  const cor = percentual >= 100 ? 'var(--ok)' : percentual >= 61 ? 'var(--stamp)' : 'var(--warn)';
 
   return (
     <div className="rounded-full overflow-hidden" style={{ background: 'var(--line)', height: '8px' }}>

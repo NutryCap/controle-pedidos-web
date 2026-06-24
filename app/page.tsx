@@ -70,6 +70,7 @@ const COLUNAS = [
   { id: 'pedido_confirmado', titulo: 'Pedido Confirmado', status: 3 },
   { id: 'em_rota', titulo: 'Em rota de entrega', status: null }, // agrupa status 4 e 5
   { id: 'entregue', titulo: 'Entregue', status: null },
+  { id: 'pendencia', titulo: 'Pedido com Pendência', status: null }, // agrupa status 7 e 8 (cancelados/status 9 ficam fora, não são ativos)
 ];
 
 function statusTexto(status: any) {
@@ -78,7 +79,18 @@ function statusTexto(status: any) {
   if (s === 2) return 'Separação';
   if (s === 3) return 'Pedido Confirmado';
   if (s === 4 || s === 5) return 'Em rota de entrega';
+  if (s === 7) return 'Bloqueado no Comercial';
+  if (s === 8) return 'Bloqueado no Financeiro';
+  if (s === 9) return 'Cancelado';
   return status ? `Status ${status}` : 'Sem status';
+}
+
+// Motivo de pendência exibido como tag no card, conforme o status.
+function motivoPendencia(status: any) {
+  const s = Number(status);
+  if (s === 7) return 'Bloqueado no Comercial';
+  if (s === 8) return 'Bloqueado no Financeiro';
+  return null;
 }
 
 function normalizarTexto(valor: any) {
@@ -715,8 +727,10 @@ export default function Home() {
 
   const pedidosNoPeriodo = useMemo(() => {
     const { de, ate } = limitesPeriodo;
-    if (!de && !ate) return pedidos;
-    return pedidos.filter((p) => {
+    // Pedidos cancelados (status 9) não contam em nenhuma métrica ou coluna do painel.
+    const ativos = pedidos.filter((p) => Number(p.status) !== 9);
+    if (!de && !ate) return ativos;
+    return ativos.filter((p) => {
       if (!p.entrada) return false;
       if (de && p.entrada < de) return false;
       if (ate && p.entrada > ate) return false;
@@ -748,6 +762,7 @@ export default function Home() {
     pedido_confirmado: pedidosFiltrados.filter((p) => !p.entregue && Number(p.status) === 3),
     em_rota: pedidosFiltrados.filter((p) => !p.entregue && (Number(p.status) === 4 || Number(p.status) === 5)),
     entregue: pedidosFiltrados.filter((p) => p.entregue),
+    pendencia: pedidosFiltrados.filter((p) => !p.entregue && (Number(p.status) === 7 || Number(p.status) === 8)),
   }), [pedidosFiltrados]);
 
   const totais = useMemo(() => ({
@@ -882,16 +897,51 @@ export default function Home() {
       <div className="max-w-[1800px] mx-auto space-y-4">
         {usuario.perfil === 'visualizador' && muralItens.length > 0 && (
           <div
-            className="rounded-2xl px-5 py-3 flex items-center overflow-hidden"
-            style={{ background: 'var(--ink)', minHeight: '52px' }}
+            className="rounded-2xl px-6 py-5 relative overflow-hidden"
+            style={{ background: 'var(--ink)', minHeight: '88px' }}
           >
-            <p
-              key={muralItens[muralIndice]?.id}
-              className="text-sm md:text-base font-medium text-white"
-              style={{ animation: 'mural-fade-in 0.6s ease' }}
-            >
-              {muralItens[muralIndice]?.texto}
-            </p>
+            <div className="flex items-center justify-between gap-4">
+              <button
+                onClick={() => setMuralIndice((i) => (i - 1 + muralItens.length) % muralItens.length)}
+                aria-label="Mensagem anterior"
+                className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white"
+                style={{ background: 'rgba(255,255,255,0.08)' }}
+              >
+                ‹
+              </button>
+
+              <p
+                key={muralItens[muralIndice]?.id}
+                className="text-base md:text-lg font-medium text-white text-center flex-1"
+                style={{ animation: 'mural-fade-in 0.6s ease' }}
+              >
+                {muralItens[muralIndice]?.texto}
+              </p>
+
+              <button
+                onClick={() => setMuralIndice((i) => (i + 1) % muralItens.length)}
+                aria-label="Próxima mensagem"
+                className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white"
+                style={{ background: 'rgba(255,255,255,0.08)' }}
+              >
+                ›
+              </button>
+            </div>
+
+            <div className="flex items-center justify-center gap-1.5 mt-3">
+              {muralItens.map((item, i) => (
+                <span
+                  key={item.id}
+                  style={{
+                    width: i === muralIndice ? '18px' : '6px',
+                    height: '6px',
+                    borderRadius: '3px',
+                    background: i === muralIndice ? 'white' : 'rgba(255,255,255,0.3)',
+                    transition: 'all 0.3s ease',
+                  }}
+                />
+              ))}
+            </div>
           </div>
         )}
 
@@ -950,9 +1000,9 @@ export default function Home() {
                   <div className="flex justify-between text-sm mb-1">
                     <span style={{ color: 'var(--ink-soft)' }}>Geral da empresa</span>
                     <span className="font-mono font-semibold" style={{ color: 'var(--ink)' }}>
-                      {vendasDoMes.geral.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                      {' / '}
-                      {Number(metaDoMes.meta_geral).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      {Number(metaDoMes.meta_geral) > 0
+                        ? `${Math.min(100, Math.round((vendasDoMes.geral / Number(metaDoMes.meta_geral)) * 100))}%`
+                        : '-'}
                     </span>
                   </div>
                   <BarraProgresso valor={vendasDoMes.geral} meta={Number(metaDoMes.meta_geral)} />
@@ -962,14 +1012,13 @@ export default function Home() {
                   const metaRep = Number(metaDoMes.metas_por_representante?.[rep.codigo] || 0);
                   if (!metaRep) return null;
                   const vendidoRep = vendasDoMes.porRepresentante[rep.codigo] || 0;
+                  const percentualRep = Math.min(100, Math.round((vendidoRep / metaRep) * 100));
                   return (
                     <div key={rep.id}>
                       <div className="flex justify-between text-sm mb-1">
                         <span style={{ color: 'var(--ink-soft)' }}>{rep.nome}</span>
                         <span className="font-mono font-semibold" style={{ color: 'var(--ink)' }}>
-                          {vendidoRep.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                          {' / '}
-                          {metaRep.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          {percentualRep}%
                         </span>
                       </div>
                       <BarraProgresso valor={vendidoRep} meta={metaRep} />
@@ -1238,7 +1287,7 @@ export default function Home() {
           )}
         </section>
 
-        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 items-start">
+        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 items-start">
           {COLUNAS.map((coluna) => {
             const lista = grupos[coluna.id as keyof typeof grupos];
             return (
@@ -1367,6 +1416,7 @@ function PedidoCard({
   const [motivoCorteLocal, setMotivoCorteLocal] = useState(pedido.motivo_corte || '');
 
   const acento = atrasado ? 'var(--alert)' : proximo ? 'var(--warn)' : pedido.entregue ? 'var(--ok)' : 'var(--line)';
+  const pendencia = motivoPendencia(pedido.status);
 
   return (
     <article
@@ -1385,6 +1435,7 @@ function PedidoCard({
           {atrasado && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--alert)', color: 'white' }}>Atrasado</span>}
           {proximo && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--warn)', color: 'white' }}>Próximo</span>}
           {pedido.entregue && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--ok)', color: 'white' }}>Entregue</span>}
+          {pendencia && <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--alert)', color: 'white' }}>{pendencia}</span>}
           {emRota && pedido.teve_corte && !pedido.entregue && (
             <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded" style={{ background: 'var(--warn)', color: 'white' }}>Com corte</span>
           )}

@@ -52,8 +52,8 @@ async function buscarMetricasInternas() {
 }
 
 // Busca uma notícia real via Google News RSS — gratuito, sem chave de API.
-// Se a busca falhar por qualquer motivo (bloqueio, instabilidade do feed, etc.),
-// simplesmente não insere notícia neste ciclo, sem quebrar o resto do mural.
+// Pega os primeiros itens do feed e escolhe um que ainda não foi usado recentemente,
+// para variar mesmo se a rota rodar mais de uma vez seguida.
 async function buscarNoticiaRelevante(): Promise<{ tipo: string; texto: string; fonte_url?: string } | null> {
   try {
     const query = encodeURIComponent('e-commerce OR varejo OR Shopee OR "Mercado Livre" when:3d');
@@ -66,23 +66,38 @@ async function buscarNoticiaRelevante(): Promise<{ tipo: string; texto: string; 
     if (!resposta.ok) return null;
 
     const xml = await resposta.text();
+    const blocosItem = xml.split('<item>').slice(1, 8); // pega até 7 itens do feed
 
-    const primeiroItem = xml.split('<item>')[1];
-    if (!primeiroItem) return null;
+    if (blocosItem.length === 0) return null;
 
-    const tituloMatch = primeiroItem.match(/<title>([\s\S]*?)<\/title>/);
-    const linkMatch = primeiroItem.match(/<link>([\s\S]*?)<\/link>/);
+    const noticiasDoFeed: { titulo: string; link?: string }[] = [];
+    for (const bloco of blocosItem) {
+      const tituloMatch = bloco.match(/<title>([\s\S]*?)<\/title>/);
+      const linkMatch = bloco.match(/<link>([\s\S]*?)<\/link>/);
+      if (!tituloMatch) continue;
+      const titulo = tituloMatch[1].replace('<![CDATA[', '').replace(']]>', '').trim();
+      if (titulo) noticiasDoFeed.push({ titulo, link: linkMatch ? linkMatch[1].trim() : undefined });
+    }
 
-    if (!tituloMatch) return null;
+    if (noticiasDoFeed.length === 0) return null;
 
-    const titulo = tituloMatch[1].replace('<![CDATA[', '').replace(']]>', '').trim();
+    // Evita repetir notícias já usadas nas últimas 24h
+    const ontemNestaHora = new Date();
+    ontemNestaHora.setHours(ontemNestaHora.getHours() - 24);
+    const { data: usadasRecentemente } = await supabaseAdmin
+      .from('mural_painel')
+      .select('texto')
+      .eq('tipo', 'noticia')
+      .gte('criado_em', ontemNestaHora.toISOString());
 
-    if (!titulo) return null;
+    const titulosUsados = new Set((usadasRecentemente || []).map((r) => r.texto.replace('📰 ', '')));
+    const disponiveis = noticiasDoFeed.filter((n) => !titulosUsados.has(n.titulo));
+    const escolhida = (disponiveis.length > 0 ? disponiveis : noticiasDoFeed)[0];
 
     return {
       tipo: 'noticia',
-      texto: `📰 ${titulo}`,
-      fonte_url: linkMatch ? linkMatch[1].trim() : undefined,
+      texto: `📰 ${escolhida.titulo}`,
+      fonte_url: escolhida.link,
     };
   } catch {
     return null;

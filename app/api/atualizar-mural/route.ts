@@ -89,6 +89,92 @@ async function buscarNoticiaRelevante(): Promise<{ tipo: string; texto: string; 
   }
 }
 
+// Calcula, para cada representante que já teve pedido registrado, o percentual da meta
+// individual batido até agora, comparado ao esperado proporcional ao dia do mês.
+// Não depende de IA — é só aritmética sobre dados reais (pedidos + metas_mensais).
+async function buscarPerformancePorRepresentante(): Promise<{ tipo: string; texto: string }[]> {
+  const hoje = new Date();
+  const ano = hoje.getFullYear();
+  const mes = hoje.getMonth() + 1;
+  const diaAtual = hoje.getDate();
+  const ultimoDiaDoMes = new Date(ano, mes, 0).getDate();
+  const proporcaoDoMesJaPassado = diaAtual / ultimoDiaDoMes;
+
+  const { data: metaDoMes } = await supabaseAdmin
+    .from('metas_mensais')
+    .select('metas_por_representante')
+    .eq('ano', ano)
+    .eq('mes', mes)
+    .maybeSingle();
+
+  if (!metaDoMes) {
+    // Sem meta definida ainda neste mês: a notícia avisa quem deve resolver isso.
+    return [
+      {
+        tipo: 'noticia',
+        texto: '⚠️ A meta de vendas deste mês ainda não foi definida. Solicite a definição junto a atendimentonutrycap@gmail.com.',
+      },
+    ];
+  }
+
+  const metasPorRepresentante = (metaDoMes.metas_por_representante || {}) as Record<string, number>;
+  const codigosComMeta = Object.keys(metasPorRepresentante).filter((c) => metasPorRepresentante[c] > 0);
+
+  if (codigosComMeta.length === 0) return [];
+
+  const isoInicioMes = `${ano}-${String(mes).padStart(2, '0')}-01`;
+  const isoFimMes = `${ano}-${String(mes).padStart(2, '0')}-${String(ultimoDiaDoMes).padStart(2, '0')}`;
+
+  const { data: pedidosDoMes } = await supabaseAdmin
+    .from('pedidos')
+    .select('representante, total')
+    .gte('entrada', isoInicioMes)
+    .lte('entrada', isoFimMes)
+    .neq('status', 9); // cancelados não contam como venda
+
+  // Para identificar o nome de exibição de cada código de representante, usamos a tabela usuarios.
+  const { data: representantesCadastrados } = await supabaseAdmin
+    .from('usuarios')
+    .select('nome, representante_codigo')
+    .eq('perfil', 'representante');
+
+  const nomePorCodigo: Record<string, string> = {};
+  for (const r of representantesCadastrados || []) {
+    if (r.representante_codigo) nomePorCodigo[r.representante_codigo] = r.nome;
+  }
+
+  const vendidoPorCodigo: Record<string, number> = {};
+  for (const p of pedidosDoMes || []) {
+    if (!p.representante) continue;
+    vendidoPorCodigo[p.representante] = (vendidoPorCodigo[p.representante] || 0) + (Number(p.total) || 0);
+  }
+
+  const itens: { tipo: string; texto: string }[] = [];
+
+  for (const codigo of codigosComMeta) {
+    const meta = metasPorRepresentante[codigo];
+    const vendido = vendidoPorCodigo[codigo] || 0;
+    const percentualMeta = Math.round((vendido / meta) * 100);
+    const percentualEsperado = Math.round(proporcaoDoMesJaPassado * 100);
+    const nome = nomePorCodigo[codigo] || codigo;
+
+    if (percentualMeta < percentualEsperado - 10) {
+      // Mais de 10 pontos percentuais abaixo do esperado para o dia do mês: vale alertar.
+      itens.push({
+        tipo: 'noticia',
+        texto: `📉 ${nome} está com vendas abaixo do esperado: ${percentualMeta}% da meta batida (esperado seria perto de ${percentualEsperado}% considerando o dia do mês).`,
+      });
+    } else {
+      itens.push({
+        tipo: 'noticia',
+        texto: `📈 ${nome} já atingiu ${percentualMeta}% da meta individual deste mês.`,
+      });
+    }
+  }
+
+  return itens;
+}
+
 const FRASES_MOTIVACIONAIS = [
   'Cada pedido entregue no prazo é a marca da nossa confiança chegando até o cliente.',
   'Hoje é um bom dia para superar a meta de ontem.',
@@ -164,6 +250,8 @@ export async function GET(request: Request) {
 
     const noticia = await buscarNoticiaRelevante();
     if (noticia) novosItens.push(noticia);
+
+    novosItens.push(...(await buscarPerformancePorRepresentante()));
 
     novosItens.push(await gerarFraseMotivacional());
 

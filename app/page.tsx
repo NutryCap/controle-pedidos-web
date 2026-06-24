@@ -235,7 +235,7 @@ export default function Home() {
     try {
       const { data: auth } = await comTimeout(
         supabase.auth.getUser(),
-        20000,
+        12000,
         'A verificação de login demorou demais.'
       );
 
@@ -246,7 +246,7 @@ export default function Home() {
 
       const { data, error } = await comTimeout(
         supabase.from('usuarios').select('*').eq('id', auth.user.id).single(),
-        20000,
+        12000,
         'A busca do seu perfil demorou demais.'
       );
 
@@ -259,9 +259,17 @@ export default function Home() {
 
       setUsuario(data as Usuario);
     } catch (error: any) {
-      setMensagem(`Erro de conexão ao carregar seu usuário: ${error?.message || String(error)}. Recarregue a página e tente novamente.`);
-      setTipoMensagem('erro');
+      // Sessão local provavelmente corrompida ou expirada de forma anômala (token preso).
+      // Em vez de deixar a pessoa precisar limpar cache manualmente, o app se autocorrige:
+      // encerra a sessão local e mostra a tela de login limpa, pronta para novo acesso.
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // mesmo se o signOut falhar, seguimos para limpar o estado local de qualquer forma
+      }
       setUsuario(null);
+      setMensagem('Sua sessão expirou ou ficou inválida. Faça login novamente.');
+      setTipoMensagem('info');
     } finally {
       setCarregando(false);
     }
